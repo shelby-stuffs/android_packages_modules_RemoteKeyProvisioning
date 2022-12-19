@@ -60,7 +60,11 @@ android_app {
     libs: [
         "framework-annotations-lib",
     ],
+    optimize: {
+        proguard_flags_files: ["proguard.flags"]
+    },
     static_libs: [
+        "cbor-java",
         "com.android.rkpdapp-aidl-java",
         "androidx.work_work-runtime",
     ],
@@ -69,7 +73,6 @@ android_app {
         //":statslog-rkpd-java-gen",
         "src/**/*.java"
     ],
-    plugins: ["java_api_finder"],
     apex_available: [
         "com.android.rkpd",
     ],
