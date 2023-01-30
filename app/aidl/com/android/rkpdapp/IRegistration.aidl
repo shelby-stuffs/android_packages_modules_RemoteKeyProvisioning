@@ -17,6 +17,7 @@
 package com.android.rkpdapp;
 
 import com.android.rkpdapp.IGetKeyCallback;
+import com.android.rkpdapp.IStoreUpgradedKeyCallback;
 
 /**
  * This interface is associated with the registration of an
@@ -77,11 +78,14 @@ oneway interface IRegistration {
      * certificate for the key is unchanged, and the key will still expire at
      * the same time it would have if storeUpgradedKey had never been called.
      *
-     * @param keyId The client-chosen key identifier by the client. This key
-     * blob will replace the previous key blob associated with the identifier.
-     *
+     * @param oldKeyBlob This key blob will be replaced by newKeyBlob in the
+     * rkpd data store. Future requests for the key will return newKeyBlob,
+     * and oldKeyBlob is forgotten.
      * @param newKeyblob The new blob to replace the key blob currently indexed
      * by keyId.
+     * @param callback Receives the result of the call. A callback must only
+     * be used with one {@code storeUpgradedKey} call at a time.
      */
-    void storeUpgradedKey(int keyId, in byte[] newKeyBlob);
+    void storeUpgradedKey(
+            in byte[] oldKeyBlob, in byte[] newKeyBlob, IStoreUpgradedKeyCallback callback);
 }

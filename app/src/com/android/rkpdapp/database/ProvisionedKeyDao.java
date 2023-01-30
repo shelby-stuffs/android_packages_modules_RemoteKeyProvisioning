@@ -22,8 +22,6 @@ import androidx.room.Query;
 import androidx.room.Transaction;
 import androidx.room.Update;
 
-import com.android.rkpdapp.RkpdException;
-
 import java.time.Instant;
 import java.util.List;
 
@@ -69,9 +67,21 @@ public abstract class ProvisionedKeyDao {
      * Get provisioned keys that can be assigned to clients.
      */
     @Query("SELECT * FROM provisioned_keys"
-            + " WHERE client_uid IS NULL AND irpc_hal = :irpcHal AND expiration_time IS NOT NULL"
+            + " WHERE client_uid IS NULL AND irpc_hal = :irpcHal"
             + " LIMIT 1")
     abstract ProvisionedKey getUnassignedKeyForIrpc(String irpcHal);
+
+    /**
+     * Gets total number of keys that can be assigned for a specific IRPC.
+     */
+    @Query("SELECT COUNT(*) FROM provisioned_keys WHERE client_uid IS NULL AND irpc_hal = :irpcHal")
+    public abstract int getTotalUnassignedKeysForIrpc(String irpcHal);
+
+    /**
+     * Gets total keys attested for a specific IRPC.
+     */
+    @Query("SELECT COUNT(*) FROM provisioned_keys WHERE irpc_hal = :irpcHal")
+    public abstract int getTotalKeysForIrpc(String irpcHal);
 
     /**
      * Get key for given client and IRPC.
@@ -84,7 +94,7 @@ public abstract class ProvisionedKeyDao {
      * Stores the upgraded key blob.
      */
     @Query("UPDATE provisioned_keys SET key_blob = :newKeyBlob WHERE key_blob = :oldKeyBlob")
-    public abstract void upgradeKeyBlob(byte[] oldKeyBlob, byte[] newKeyBlob);
+    public abstract int upgradeKeyBlob(byte[] oldKeyBlob, byte[] newKeyBlob);
 
     /**
      * This transaction directly tries to assign an unassigned provisioned key to the given keyId
@@ -93,12 +103,15 @@ public abstract class ProvisionedKeyDao {
      * @param irpcHal Searches for unassigned keys for this remotely provisioned component.
      * @param clientUid Uid for RKPD's client that needs to set up the key for its own client.
      * @param keyId Client provided identifier to set up the key with.
+     *
+     * @return the key that has been assigned to the given (irpcHal, clientUid, keyId) tuple,
+     * else null if no keys are available to be assigned.
      */
     @Transaction
-    public ProvisionedKey assignKey(String irpcHal, int clientUid, int keyId) throws RkpdException {
+    public ProvisionedKey assignKey(String irpcHal, int clientUid, int keyId) {
         ProvisionedKey availableKey = getUnassignedKeyForIrpc(irpcHal);
         if (availableKey == null) {
-            throw new RkpdException(RkpdException.Status.OUT_OF_KEYS, "Out of keys.");
+            return null;
         }
         availableKey.clientUid = clientUid;
         availableKey.keyId = keyId;
