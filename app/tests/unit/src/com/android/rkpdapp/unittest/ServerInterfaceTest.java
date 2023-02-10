@@ -27,6 +27,7 @@ import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.EthernetManager;
 import android.net.NetworkInfo;
+import android.security.NetworkSecurityPolicy;
 import android.util.Base64;
 import android.util.Log;
 
@@ -104,6 +105,7 @@ public class ServerInterfaceTest {
 
     private static Context sContext;
     private ServerInterface mServerInterface;
+    private boolean mCleartextPolicy;
 
     @BeforeClass
     public static void init() {
@@ -114,11 +116,15 @@ public class ServerInterfaceTest {
     public void setUp() {
         Settings.clearPreferences(sContext);
         mServerInterface = new ServerInterface(sContext);
+        mCleartextPolicy =
+                NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted();
+        NetworkSecurityPolicy.getInstance().setCleartextTrafficPermitted(true);
     }
 
     @After
     public void tearDown() {
         Settings.clearPreferences(sContext);
+        NetworkSecurityPolicy.getInstance().setCleartextTrafficPermitted(mCleartextPolicy);
     }
 
     @Test
@@ -262,12 +268,12 @@ public class ServerInterfaceTest {
     @Test
     public void testDataBudgetEmptyFetchGeekNetworkDisconnected() throws Exception {
         // Check the data budget in order to initialize a rolling window.
-        setEthernetEnabled(false);
-        setAirplaneMode(true);
-        assertThat(Settings.hasErrDataBudget(sContext, null /* curTime */)).isTrue();
-        Settings.consumeErrDataBudget(sContext, Settings.FAILURE_DATA_USAGE_MAX);
-        ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(sContext);
         try {
+            setEthernetEnabled(false);
+            setAirplaneMode(true);
+            assertThat(Settings.hasErrDataBudget(sContext, null /* curTime */)).isTrue();
+            Settings.consumeErrDataBudget(sContext, Settings.FAILURE_DATA_USAGE_MAX);
+            ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(sContext);
             mServerInterface.fetchGeek(metrics);
             fail("Network transaction should not have proceeded.");
         } catch (RkpdException e) {
@@ -453,8 +459,9 @@ public class ServerInterfaceTest {
                 Manifest.permission.NETWORK_SETTINGS)) {
             cm.setAirplaneMode(enable);
 
-            // Now wait a "reasonable" time for the network to go down
-            for (int i = 0; i < 100; ++i) {
+            // Now wait a "reasonable" time for the network to go down. This timeout matches
+            // the connectivity manager tests, which wait for 2 minutes.
+            for (int i = 0; i < 120; ++i) {
                 NetworkInfo networkInfo = cm.getActiveNetworkInfo();
                 Log.e(TAG, "Checking active network... " + networkInfo);
                 if (enable) {
@@ -466,7 +473,7 @@ public class ServerInterfaceTest {
                     Log.e(TAG, "Successfully reconnected to the network.");
                     return;
                 }
-                Thread.sleep(300);
+                Thread.sleep(1000);
             }
         }
         fail("Failed to " + (enable ? "enable" : "disable") + " airplane mode");
