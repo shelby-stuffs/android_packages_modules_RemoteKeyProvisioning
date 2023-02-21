@@ -19,10 +19,12 @@ package com.android.rkpdapp.database;
 import androidx.annotation.NonNull;
 import androidx.room.ColumnInfo;
 import androidx.room.Entity;
+import androidx.room.Ignore;
 import androidx.room.Index;
 import androidx.room.PrimaryKey;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -60,6 +62,10 @@ public class ProvisionedKey {
     @ColumnInfo(name = "key_id")
     public Integer keyId;
 
+    // Provide default ctor just for Room generated code
+    public ProvisionedKey() {}
+
+    @Ignore
     public ProvisionedKey(@NonNull byte[] keyBlob, @NonNull String irpcHal,
             @NonNull byte[] publicKey, @NonNull byte[] certificateChain,
             @NonNull Instant expirationTime) {
@@ -79,18 +85,22 @@ public class ProvisionedKey {
                 && Objects.equals(irpcHal, that.irpcHal)
                 && Arrays.equals(publicKey, that.publicKey)
                 && Arrays.equals(certificateChain, that.certificateChain)
-                && Objects.equals(expirationTime, that.expirationTime)
+                && Objects.equals(truncate(expirationTime), truncate(that.expirationTime))
                 && Objects.equals(clientUid, that.clientUid)
                 && Objects.equals(keyId, that.keyId);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(irpcHal, expirationTime, clientUid, keyId);
+        int result = Objects.hash(irpcHal, truncate(expirationTime), clientUid, keyId);
         result = 31 * result + Arrays.hashCode(keyBlob);
         result = 31 * result + Arrays.hashCode(publicKey);
         result = 31 * result + Arrays.hashCode(certificateChain);
         return result;
+    }
+
+    private static Instant truncate(Instant original) {
+        return original == null ? null : original.truncatedTo(ChronoUnit.MILLIS);
     }
 
     @Override
