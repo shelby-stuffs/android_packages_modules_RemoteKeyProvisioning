@@ -21,8 +21,8 @@ genrule {
     name: "statslog-rkpd-java-gen",
     tools: ["stats-log-api-gen"],
     cmd: "$(location stats-log-api-gen) --java $(out) --module remoteprovisioner " +
-         "--javaPackage com.android.rkpd --javaClass RkpdStatsLog",
-    out: ["com/android/rkpd/RkpdStatsLog.java"],
+        "--javaPackage com.android.rkpdapp --javaClass RkpdStatsLog",
+    out: ["com/android/rkpdapp/RkpdStatsLog.java"],
 }
 
 aidl_interface {
@@ -51,27 +51,36 @@ aidl_interface {
     },
 }
 
+sdk {
+    name: "rkpd-sdk",
+    apexes: ["com.android.rkpd"],
+}
+
 android_app {
     name: "rkpdapp",
     sdk_version: "module_current",
-    min_sdk_version: "33",
+    min_sdk_version: "UpsideDownCake",
     updatable: false,
     privileged: true,
     libs: [
         "framework-annotations-lib",
+        "framework-connectivity",
+        "framework-connectivity-t",
+        "framework-statsd",
     ],
     optimize: {
         proguard_flags_files: ["proguard.flags"],
     },
     static_libs: [
+        "android.hardware.security.rkp-V3-java",
         "androidx.room_room-runtime",
+        "androidx.work_work-runtime",
         "cbor-java",
         "com.android.rkpdapp-aidl-java",
-        "androidx.work_work-runtime",
     ],
     resource_dirs: ["res"],
     srcs: [
-        // ":statslog-rkpd-java-gen",
+        ":statslog-rkpd-java-gen",
         "src/**/*.java",
     ],
     plugins: [
@@ -80,4 +89,7 @@ android_app {
     apex_available: [
         "com.android.rkpd",
     ],
+    lint: {
+        strict_updatability_linting: true,
+    },
 }

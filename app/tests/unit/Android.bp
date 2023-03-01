@@ -15,9 +15,9 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-android_test {
-    name: "RkpdAppUnitTests",
-    srcs: ["src/**/*.java"],
+java_defaults {
+    name: "RkpdAppUnitTestsDefault",
+    srcs: [":com.android.rkpdapp.unittests.src"],
     exclude_srcs: ["src/**/KeyRegisteredTest.java"],
     static_libs: [
         "Nene",
@@ -32,15 +32,27 @@ android_test {
         "mockito-target-extended-minus-junit4",
         "platform-test-annotations",
         "truth-prebuilt",
-        "rkpdapp-tink-prebuilt",
+        "rkpdapp-tink-prebuilt-test-only",
         "bouncycastle-unbundled",
     ],
     platform_apis: true,
-    test_config: "RkpdAppUnitTests.xml",
     test_suites: [
+        "general-tests",
         "device-tests",
         "mts-rkpd",
     ],
+    min_sdk_version: "UpsideDownCake",
+}
+
+filegroup {
+    name: "com.android.rkpdapp.unittests.src",
+    srcs: ["src/**/*.java"],
+}
+
+android_test {
+    name: "RkpdAppUnitTests",
+    defaults: ["RkpdAppUnitTestsDefault"],
+    test_config: "RkpdAppUnitTests.xml",
     instrumentation_for: "rkpdapp",
 }
 
@@ -67,8 +79,11 @@ android_test {
 // prebuild jar to supply that functionality.
 // Ed25519/X25519 support in conscrypt is tracked by b/214203951
 java_import {
-    name: "rkpdapp-tink-prebuilt",
+    name: "rkpdapp-tink-prebuilt-test-only",
     jars: ["tink-android-1.5.0.jar"],
     sdk_version: "module_current",
-    visibility: ["//visibility:private"],
+    visibility: [
+        ":__subpackages__",
+        "//vendor:__subpackages__",
+    ],
 }
