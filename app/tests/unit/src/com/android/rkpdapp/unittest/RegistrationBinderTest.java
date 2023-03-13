@@ -22,6 +22,8 @@ import static com.google.common.truth.Truth.assertWithMessage;
 import static org.junit.Assert.assertThrows;
 import static org.mockito.AdditionalAnswers.answer;
 import static org.mockito.AdditionalAnswers.answerVoid;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.contains;
@@ -37,24 +39,29 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import android.content.Context;
 
+import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
 import com.android.rkpdapp.GeekResponse;
 import com.android.rkpdapp.IGetKeyCallback;
 import com.android.rkpdapp.IStoreUpgradedKeyCallback;
 import com.android.rkpdapp.RemotelyProvisionedKey;
+import com.android.rkpdapp.RkpdException;
 import com.android.rkpdapp.database.ProvisionedKey;
 import com.android.rkpdapp.database.ProvisionedKeyDao;
 import com.android.rkpdapp.interfaces.ServerInterface;
 import com.android.rkpdapp.provisioner.Provisioner;
 import com.android.rkpdapp.service.RegistrationBinder;
+import com.android.rkpdapp.utils.Settings;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentMatcher;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.CountDownLatch;
@@ -72,9 +79,10 @@ public class RegistrationBinderTest {
     private static final byte[] CERT_CHAIN = randBytes();
     private static final String IRPC_HAL = "fake remotely provisioned component";
     private static final ProvisionedKey FAKE_KEY = new ProvisionedKey(KEY_BLOB, IRPC_HAL, PUBKEY,
-            CERT_CHAIN, Instant.now().plusSeconds(60));
+            CERT_CHAIN, Instant.now().plus(5, ChronoUnit.DAYS));
     private static final Duration MAX_TIMEOUT = Duration.ofSeconds(2);
 
+    private Context mContext;
     private ProvisionedKeyDao mMockDao;
     private ServerInterface mRkpServer;
     private Provisioner mMockProvisioner;
@@ -94,6 +102,19 @@ public class RegistrationBinderTest {
         );
     }
 
+    private Instant isInRange(Instant min, Instant max) {
+        return argThat(new ArgumentMatcher<>() {
+            public boolean matches(Instant actual) {
+                return (actual.equals(min) || actual.isAfter(min))
+                        && (actual.equals(max) || actual.isBefore(max));
+            }
+
+            public String toString() {
+                return "[value between " + min + " and " + max + "]";
+            }
+        });
+    }
+
     private void completeAllTasks() throws InterruptedException {
         mThreadPool.shutdown();
         assertWithMessage("Background tasks failed to complete in " + MAX_TIMEOUT)
@@ -103,12 +124,13 @@ public class RegistrationBinderTest {
 
     @Before
     public void setUp() {
+        mContext = ApplicationProvider.getApplicationContext();
         mMockDao = mock(ProvisionedKeyDao.class);
         mRkpServer = mock(ServerInterface.class);
         mMockProvisioner = mock(Provisioner.class);
         mThreadPool = Executors.newCachedThreadPool();
-        mRegistration = new RegistrationBinder(mock(Context.class),
-                CLIENT_UID, IRPC_HAL, mMockDao, mRkpServer, mMockProvisioner, mThreadPool);
+        mRegistration = new RegistrationBinder(mContext, CLIENT_UID, IRPC_HAL, mMockDao,
+                mRkpServer, mMockProvisioner, mThreadPool);
     }
 
     @Test
@@ -128,7 +150,7 @@ public class RegistrationBinderTest {
     public void getKeyAssignsAvailableKey() throws Exception {
         doReturn(FAKE_KEY)
                 .when(mMockDao)
-                .assignKey(IRPC_HAL, CLIENT_UID, KEY_ID);
+                .getOrAssignKey(eq(IRPC_HAL), notNull(), eq(CLIENT_UID), eq(KEY_ID));
 
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         mRegistration.getKey(KEY_ID, callback);
@@ -138,12 +160,47 @@ public class RegistrationBinderTest {
     }
 
     @Test
-    public void getKeyProvisionsKeysWhenEmpty() throws Exception {
-        // The first call to assignKeys returns null, indicating that the provisioner needs to run,
-        // then the second call returns a key, which signifies provision success.
+    public void getKeyAssignsLongExpiringKey() throws Exception {
+        doReturn(FAKE_KEY)
+                .when(mMockDao)
+                .getOrAssignKey(eq(IRPC_HAL), notNull(), eq(CLIENT_UID), eq(KEY_ID));
+
+        Instant minExpiry = Instant.now().plus(Settings.getExpiringBy(mContext));
+        mRegistration.getKey(KEY_ID, mock(IGetKeyCallback.class));
+        completeAllTasks();
+        Instant maxExpiry = Instant.now().plus(Settings.getExpiringBy(mContext));
+
+        verify(mMockDao)
+                .getOrAssignKey(notNull(), isInRange(minExpiry, maxExpiry), anyInt(), anyInt());
+    }
+
+    @Test
+    public void getKeyAssignmentFallsBackToShorterLivedKeys() throws Exception {
         doReturn(null, FAKE_KEY)
                 .when(mMockDao)
-                .assignKey(IRPC_HAL, CLIENT_UID, KEY_ID);
+                .getOrAssignKey(eq(IRPC_HAL), notNull(), eq(CLIENT_UID), eq(KEY_ID));
+
+        Instant minExpiry = Instant.now().plus(Settings.getExpiringBy(mContext));
+        Instant minFallbackExpiry = Instant.now().plus(RegistrationBinder.MIN_KEY_LIFETIME);
+        mRegistration.getKey(KEY_ID, mock(IGetKeyCallback.class));
+        completeAllTasks();
+        Instant maxExpiry = Instant.now().plus(Settings.getExpiringBy(mContext));
+        Instant maxFallbackExpiry = Instant.now().plus(RegistrationBinder.MIN_KEY_LIFETIME);
+
+        verify(mMockDao)
+                .getOrAssignKey(notNull(), isInRange(minExpiry, maxExpiry), anyInt(), anyInt());
+        verify(mMockDao)
+                .getOrAssignKey(notNull(), isInRange(minFallbackExpiry, maxFallbackExpiry),
+                        anyInt(), anyInt());
+    }
+
+    @Test
+    public void getKeyProvisionsKeysWhenEmpty() throws Exception {
+        // The first two calls to assignKey returns null, indicating that the provisioner needs
+        // to run, then the last call returns a key, which signifies provision success.
+        doReturn(null, null, FAKE_KEY)
+                .when(mMockDao)
+                .getOrAssignKey(eq(IRPC_HAL), notNull(), eq(CLIENT_UID), eq(KEY_ID));
 
         final GeekResponse fakeGeekResponse = new GeekResponse();
         doReturn(fakeGeekResponse)
@@ -160,7 +217,7 @@ public class RegistrationBinderTest {
     }
 
     @Test
-    public void getKeyHandlesProvisioningFailure() throws Exception {
+    public void getKeyHandlesUnexpectedProvisioningFailure() throws Exception {
         doThrow(new RuntimeException("PROVISIONING FAIL"))
                 .when(mMockProvisioner)
                 .provisionKeys(any(), eq(IRPC_HAL), any());
@@ -168,9 +225,57 @@ public class RegistrationBinderTest {
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         mRegistration.getKey(KEY_ID, callback);
         completeAllTasks();
-        verify(callback).onError("PROVISIONING FAIL");
+        verify(callback).onError(IGetKeyCallback.Error.ERROR_UNKNOWN, "PROVISIONING FAIL");
         verify(callback).onProvisioningNeeded();
         verifyNoMoreInteractions(callback);
+    }
+
+    private static byte getExpectedGetKeyError(RkpdException.ErrorCode errorCode) {
+        switch (errorCode) {
+            case NO_NETWORK_CONNECTIVITY:
+                return IGetKeyCallback.Error.ERROR_PENDING_INTERNET_CONNECTIVITY;
+            case DEVICE_NOT_REGISTERED:
+                return IGetKeyCallback.Error.ERROR_PERMANENT;
+            case NETWORK_COMMUNICATION_ERROR:
+            case HTTP_CLIENT_ERROR:
+            case HTTP_SERVER_ERROR:
+            case HTTP_UNKNOWN_ERROR:
+            case INTERNAL_ERROR:
+                return IGetKeyCallback.Error.ERROR_UNKNOWN;
+        }
+        throw new RuntimeException("Unexpected error code: " + errorCode);
+    }
+
+    @Test
+    public void getKeyMapsRkpdExceptionsCorrectly() throws Exception {
+        for (RkpdException.ErrorCode errorCode: RkpdException.ErrorCode.values()) {
+            doThrow(new RkpdException(errorCode, errorCode.toString()))
+                    .when(mMockProvisioner)
+                    .provisionKeys(any(), eq(IRPC_HAL), any());
+
+            IGetKeyCallback callback = mock(IGetKeyCallback.class);
+            mRegistration.getKey(KEY_ID, callback);
+            // We cannot use completeAllTasks here because that shuts down the thread pool,
+            // so use a timeout on verifying the callback instead.
+            verify(callback, timeout(MAX_TIMEOUT.toMillis()))
+                    .onError(getExpectedGetKeyError(errorCode), errorCode.toString());
+            verify(callback).onProvisioningNeeded();
+            verifyNoMoreInteractions(callback);
+        }
+    }
+
+    @Test
+    public void getKeyDeletesSoonToExpireKeys() throws Exception {
+        doReturn(FAKE_KEY)
+                .when(mMockDao)
+                .getKeyForClientAndIrpc(IRPC_HAL, CLIENT_UID, KEY_ID);
+
+        Instant minExpiry = Instant.now().plus(RegistrationBinder.MIN_KEY_LIFETIME);
+        mRegistration.getKey(KEY_ID, mock(IGetKeyCallback.class));
+        completeAllTasks();
+        Instant maxExpiry = Instant.now().plus(RegistrationBinder.MIN_KEY_LIFETIME);
+
+        verify(mMockDao).deleteExpiringKeys(isInRange(minExpiry, maxExpiry));
     }
 
     @Test
@@ -180,7 +285,8 @@ public class RegistrationBinderTest {
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         mRegistration.getKey(KEY_ID, callback);
         completeAllTasks();
-        verify(callback).onError("Provisioning failed, no keys available");
+        verify(callback).onError(IGetKeyCallback.Error.ERROR_UNKNOWN,
+                "Provisioning failed, no keys available");
         verify(callback).onProvisioningNeeded();
         verify(mMockProvisioner).provisionKeys(any(), eq(IRPC_HAL), any());
         verifyNoMoreInteractions(callback);
@@ -190,7 +296,7 @@ public class RegistrationBinderTest {
     public void getKeyKicksOffBackgroundProvisioningWhenNeeded() throws Exception {
         doReturn(FAKE_KEY)
                 .when(mMockDao)
-                .assignKey(IRPC_HAL, CLIENT_UID, KEY_ID);
+                .getOrAssignKey(eq(IRPC_HAL), notNull(), eq(CLIENT_UID), eq(KEY_ID));
         doReturn(true)
                 .when(mMockProvisioner)
                 .isProvisioningNeeded(IRPC_HAL);
@@ -212,7 +318,7 @@ public class RegistrationBinderTest {
     public void getKeyDoesNotKickOffBackgroundProvisioningWhenNotNeeded() throws Exception {
         doReturn(FAKE_KEY)
                 .when(mMockDao)
-                .assignKey(IRPC_HAL, CLIENT_UID, KEY_ID);
+                .getOrAssignKey(eq(IRPC_HAL), notNull(), eq(CLIENT_UID), eq(KEY_ID));
         doReturn(false)
                 .when(mMockProvisioner)
                 .isProvisioningNeeded(IRPC_HAL);
@@ -233,12 +339,12 @@ public class RegistrationBinderTest {
     public void getKeyHandlesCancelBeforeProvisioning() throws Exception {
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         doAnswer(
-                answer((hal, uid, keyId) -> {
+                answer((hal, minExpiry, uid, keyId) -> {
                     mRegistration.cancelGetKey(callback);
                     return null;
                 }))
                 .when(mMockDao)
-                .assignKey(IRPC_HAL, CLIENT_UID, KEY_ID);
+                .getOrAssignKey(eq(IRPC_HAL), notNull(), eq(CLIENT_UID), eq(KEY_ID));
         mRegistration.getKey(KEY_ID, callback);
 
         completeAllTasks();

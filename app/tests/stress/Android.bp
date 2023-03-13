@@ -1,4 +1,4 @@
-// Copyright (C) 2022 The Android Open Source Project
+// Copyright (C) 2023 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,44 +16,22 @@ package {
 }
 
 android_test {
-    name: "RkpdAppUnitTests",
+    name: "RkpdAppStressTests",
     srcs: ["src/**/*.java"],
     static_libs: [
         "Nene",
-        "RkpdAppTestUtil",
         "androidx.test.ext.junit",
         "androidx.test.core",
         "androidx.test.rules",
-        "androidx.work_work-runtime",
-        "androidx.work_work-testing",
         "android.security.remoteprovisioning-java",
-        "cbor-java",
-        "libnanohttpd",
-        "mockito-target-extended-minus-junit4",
         "platform-test-annotations",
         "truth-prebuilt",
-        "rkpdapp-tink-prebuilt-test-only",
-        "bouncycastle-unbundled",
     ],
     platform_apis: true,
     test_suites: [
         "general-tests",
         "device-tests",
-        "mts-rkpd",
     ],
     min_sdk_version: "UpsideDownCake",
     instrumentation_for: "rkpdapp",
-}
-
-// There's no Ed25519 support yet, in conscrypt, so we pull in a Tink
-// prebuild jar to supply that functionality.
-// Ed25519/X25519 support in conscrypt is tracked by b/214203951
-java_import {
-    name: "rkpdapp-tink-prebuilt-test-only",
-    jars: ["tink-android-1.5.0.jar"],
-    sdk_version: "module_current",
-    visibility: [
-        ":__subpackages__",
-        "//vendor:__subpackages__",
-    ],
 }

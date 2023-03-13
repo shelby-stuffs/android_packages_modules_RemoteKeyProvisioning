@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Copyright (C) 2022 The Android Open Source Project
+<!-- Copyright (C) 2023 The Android Open Source Project
 
      Licensed under the Apache License, Version 2.0 (the "License");
      you may not use this file except in compliance with the License.
@@ -13,22 +13,17 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-<configuration description="Unit tests for the rkpd app.">
-    <object type="module_controller"
-            class="com.android.tradefed.testtype.suite.module.MinApiLevelModuleController">
-        <option name="min-api-level" value="34" />
-        <option name="api-level-prop" value="ro.product.first_api_level" />
-    </object>
+<configuration description="Stress tests for the rkpd app.">
     <option name="test-suite-tag" value="apct" />
     <option name="test-suite-tag" value="apct-instrumentation" />
 
     <target_preparer class="com.android.tradefed.targetprep.suite.SuiteApkInstaller">
         <option name="cleanup-apks" value="true" />
-        <option name="test-file-name" value="RkpdAppUnitTests.apk" />
+        <option name="test-file-name" value="RkpdAppStressTests.apk" />
     </target_preparer>
 
     <test class="com.android.tradefed.testtype.AndroidJUnitTest" >
-        <option name="package" value="com.android.rkpdapp.unittest" />
+        <option name="package" value="com.android.rkpdapp.stress" />
         <option name="runner" value="androidx.test.runner.AndroidJUnitRunner" />
     </test>
 
