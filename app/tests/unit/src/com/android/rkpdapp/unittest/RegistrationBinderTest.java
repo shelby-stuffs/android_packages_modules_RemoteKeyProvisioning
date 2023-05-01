@@ -32,6 +32,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
@@ -50,6 +51,7 @@ import com.android.rkpdapp.RkpdException;
 import com.android.rkpdapp.database.ProvisionedKey;
 import com.android.rkpdapp.database.ProvisionedKeyDao;
 import com.android.rkpdapp.interfaces.ServerInterface;
+import com.android.rkpdapp.interfaces.SystemInterface;
 import com.android.rkpdapp.provisioner.Provisioner;
 import com.android.rkpdapp.service.RegistrationBinder;
 import com.android.rkpdapp.utils.Settings;
@@ -88,6 +90,7 @@ public class RegistrationBinderTest {
     private Provisioner mMockProvisioner;
     private ExecutorService mThreadPool;
     private RegistrationBinder mRegistration;
+    private GeekResponse mFakeGeekResponse;
 
     private static byte[] randBytes() {
         byte[] bytes = new byte[RAND.nextInt(1024)];
@@ -123,13 +126,21 @@ public class RegistrationBinderTest {
     }
 
     @Before
-    public void setUp() {
+    public void setUp() throws RkpdException {
         mContext = ApplicationProvider.getApplicationContext();
         mMockDao = mock(ProvisionedKeyDao.class);
         mRkpServer = mock(ServerInterface.class);
         mMockProvisioner = mock(Provisioner.class);
         mThreadPool = Executors.newCachedThreadPool();
-        mRegistration = new RegistrationBinder(mContext, CLIENT_UID, IRPC_HAL, mMockDao,
+        mFakeGeekResponse = new GeekResponse();
+        doReturn(mFakeGeekResponse)
+                .when(mRkpServer)
+                .fetchGeekAndUpdate(any());
+
+        SystemInterface mockSystem = mock(SystemInterface.class);
+        doReturn(IRPC_HAL).when(mockSystem).getServiceName();
+
+        mRegistration = new RegistrationBinder(mContext, CLIENT_UID, mockSystem, mMockDao,
                 mRkpServer, mMockProvisioner, mThreadPool);
     }
 
@@ -202,17 +213,12 @@ public class RegistrationBinderTest {
                 .when(mMockDao)
                 .getOrAssignKey(eq(IRPC_HAL), notNull(), eq(CLIENT_UID), eq(KEY_ID));
 
-        final GeekResponse fakeGeekResponse = new GeekResponse();
-        doReturn(fakeGeekResponse)
-                .when(mRkpServer)
-                .fetchGeek(any());
-
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         mRegistration.getKey(KEY_ID, callback);
         completeAllTasks();
         verify(callback).onSuccess(matches(FAKE_KEY));
         verify(callback).onProvisioningNeeded();
-        verify(mMockProvisioner).provisionKeys(any(), eq(IRPC_HAL), same(fakeGeekResponse));
+        verify(mMockProvisioner).provisionKeys(any(), any(), same(mFakeGeekResponse));
         verifyNoMoreInteractions(callback);
     }
 
@@ -220,7 +226,7 @@ public class RegistrationBinderTest {
     public void getKeyHandlesUnexpectedProvisioningFailure() throws Exception {
         doThrow(new RuntimeException("PROVISIONING FAIL"))
                 .when(mMockProvisioner)
-                .provisionKeys(any(), eq(IRPC_HAL), any());
+                .provisionKeys(any(), any(), any());
 
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         mRegistration.getKey(KEY_ID, callback);
@@ -251,7 +257,7 @@ public class RegistrationBinderTest {
         for (RkpdException.ErrorCode errorCode: RkpdException.ErrorCode.values()) {
             doThrow(new RkpdException(errorCode, errorCode.toString()))
                     .when(mMockProvisioner)
-                    .provisionKeys(any(), eq(IRPC_HAL), any());
+                    .provisionKeys(any(), any(), any());
 
             IGetKeyCallback callback = mock(IGetKeyCallback.class);
             mRegistration.getKey(KEY_ID, callback);
@@ -281,14 +287,29 @@ public class RegistrationBinderTest {
     @Test
     public void getKeyNoKeysAreProvisioned() throws Exception {
         // This test ensures that getKey will handle the case in which provisioner doesn't error
-        // out, but it also does not actually provision any keys. This shouldn't ever happen.
+        // out, but it also does not actually provision any keys.
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         mRegistration.getKey(KEY_ID, callback);
         completeAllTasks();
         verify(callback).onError(IGetKeyCallback.Error.ERROR_UNKNOWN,
                 "Provisioning failed, no keys available");
         verify(callback).onProvisioningNeeded();
-        verify(mMockProvisioner).provisionKeys(any(), eq(IRPC_HAL), any());
+        verify(mMockProvisioner).provisionKeys(any(), any(), any());
+        verify(mRkpServer).fetchGeekAndUpdate(any());
+        verifyNoMoreInteractions(callback);
+    }
+
+    @Test
+    public void getKeyDisableProvisioningIsHonored() throws Exception {
+        mFakeGeekResponse.numExtraAttestationKeys = 0;
+        IGetKeyCallback callback = mock(IGetKeyCallback.class);
+        mRegistration.getKey(KEY_ID, callback);
+        completeAllTasks();
+        verify(callback).onError(IGetKeyCallback.Error.ERROR_UNKNOWN,
+                "Provisioning failed, no keys available");
+        verify(callback).onProvisioningNeeded();
+        verify(mRkpServer).fetchGeekAndUpdate(any());
+        verify(mMockProvisioner, never()).provisionKeys(any(), any(), any());
         verifyNoMoreInteractions(callback);
     }
 
@@ -310,7 +331,7 @@ public class RegistrationBinderTest {
 
         completeAllTasks();
         verify(mMockProvisioner).isProvisioningNeeded(any(), eq(IRPC_HAL));
-        verify(mMockProvisioner).provisionKeys(any(), eq(IRPC_HAL), any());
+        verify(mMockProvisioner).provisionKeys(any(), any(), any());
         verifyNoMoreInteractions(mMockProvisioner);
     }
 
@@ -358,7 +379,7 @@ public class RegistrationBinderTest {
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         doAnswer(answerVoid((hal, dao, metrics) -> mRegistration.cancelGetKey(callback)))
                 .when(mMockProvisioner)
-                .provisionKeys(any(), eq(IRPC_HAL), any());
+                .provisionKeys(any(), any(), any());
         mRegistration.getKey(KEY_ID, callback);
 
         completeAllTasks();
@@ -379,7 +400,7 @@ public class RegistrationBinderTest {
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         doThrow(new InterruptedException())
                 .when(mMockProvisioner)
-                .provisionKeys(any(), eq(IRPC_HAL), any());
+                .provisionKeys(any(), any(), any());
         mRegistration.getKey(KEY_ID, callback);
 
         completeAllTasks();

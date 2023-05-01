@@ -23,7 +23,7 @@ import static com.google.common.truth.TruthJUnit.assume;
 import android.content.Context;
 import android.hardware.security.keymint.IRemotelyProvisionedComponent;
 import android.os.Process;
-import android.os.RemoteException;
+import android.os.ServiceManager;
 import android.os.SystemProperties;
 
 import androidx.test.core.app.ApplicationProvider;
@@ -34,6 +34,8 @@ import com.android.rkpdapp.database.ProvisionedKey;
 import com.android.rkpdapp.database.ProvisionedKeyDao;
 import com.android.rkpdapp.database.RkpdDatabase;
 import com.android.rkpdapp.interfaces.ServerInterface;
+import com.android.rkpdapp.interfaces.ServiceManagerInterface;
+import com.android.rkpdapp.interfaces.SystemInterface;
 import com.android.rkpdapp.provisioner.Provisioner;
 import com.android.rkpdapp.service.RegistrationBinder;
 
@@ -51,11 +53,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class RegistrationBinderStressTest {
-    private static final String IRPC_NAME = IRemotelyProvisionedComponent.DESCRIPTOR + "/default";
     private static final int NUM_THREADS = Math.min(16, Runtime.getRuntime().availableProcessors());
     private static final Duration STRESS_THREAD_TIME_LIMIT = Duration.ofSeconds(60);
+    private static final String SERVICE = IRemotelyProvisionedComponent.DESCRIPTOR + "/default";
     private final ExecutorService mExecutor = Executors.newCachedThreadPool();
     private Context mContext;
+    private SystemInterface mIrpcHal;
     private ProvisionedKeyDao mKeyDao;
 
     @Rule
@@ -67,13 +70,18 @@ public class RegistrationBinderStressTest {
                 .withMessage("The RKP server hostname is not configured -- assume RKP disabled.")
                 .that(SystemProperties.get("remote_provisioning.hostname"))
                 .isNotEmpty();
+        assume()
+                .withMessage("Remotely Provisioned Component is not found -- RKP disabled.")
+                .that(ServiceManager.isDeclared(SERVICE))
+                .isTrue();
         mContext = ApplicationProvider.getApplicationContext();
+        mIrpcHal = ServiceManagerInterface.getInstance(SERVICE);
         mKeyDao = RkpdDatabase.getDatabase(mContext).provisionedKeyDao();
         mKeyDao.deleteAllKeys();
     }
 
     private RegistrationBinder createRegistrationBinder() {
-        return new RegistrationBinder(mContext, Process.myUid(), IRPC_NAME, mKeyDao,
+        return new RegistrationBinder(mContext, Process.myUid(), mIrpcHal, mKeyDao,
                 new ServerInterface(mContext), new Provisioner(mContext, mKeyDao), mExecutor);
     }
 
@@ -82,20 +90,20 @@ public class RegistrationBinderStressTest {
         CompletableFuture<String> result = new CompletableFuture<>();
         binder.getKey(keyId, new IGetKeyCallback.Stub() {
             @Override
-            public void onSuccess(RemotelyProvisionedKey key) throws RemoteException {
+            public void onSuccess(RemotelyProvisionedKey key) {
                 result.complete("");
             }
 
             @Override
-            public void onProvisioningNeeded() throws RemoteException { /* noop */ }
+            public void onProvisioningNeeded() { /* noop */ }
 
             @Override
-            public void onCancel() throws RemoteException {
+            public void onCancel() {
                 result.complete("Received unexpected cancel");
             }
 
             @Override
-            public void onError(byte error, String description) throws RemoteException {
+            public void onError(byte error, String description) {
                 result.complete(description);
             }
         });
@@ -128,8 +136,8 @@ public class RegistrationBinderStressTest {
                     // Clear the key assignment so that it can be re-used without hitting the RKP
                     // server again. It's possible another thread already unassigned the key, so
                     // we cannot assume we get a key here.
-                    ProvisionedKey key = mKeyDao.getKeyForClientAndIrpc(IRPC_NAME, Process.myUid(),
-                            keyId);
+                    ProvisionedKey key = mKeyDao.getKeyForClientAndIrpc(mIrpcHal.getServiceName(),
+                            Process.myUid(), keyId);
                     if (key != null) {
                         key.keyId = null;
                         key.clientUid = null;
@@ -141,7 +149,7 @@ public class RegistrationBinderStressTest {
             stressThreads.add(t);
         }
 
-        for (Thread t: stressThreads) {
+        for (Thread t : stressThreads) {
             t.join();
         }
     }
