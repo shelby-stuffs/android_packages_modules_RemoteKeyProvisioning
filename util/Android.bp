@@ -15,27 +15,13 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-java_test_host {
-    name: "RkpdAppHostTests",
-    srcs: ["src/**/*.java"],
-    test_suites: [
-        "general-tests",
-        "device-tests",
-    ],
-    libs: [
-        "compatibility-host-util",
-        "core_cts_test_resources",
-        "cts-tradefed",
-        "host-libprotobuf-java-full",
-        "platformprotos",
-        "tradefed",
-        "truth-prebuilt",
-    ],
+java_binary {
+    name: "RkpRegistrationCheck",
+    srcs: ["src/**/RkpRegistrationCheck.java"],
     static_libs: [
-        "cts-statsd-atom-host-test-utils",
+        "android.hardware.security.rkp-V3-java",
+        "cbor-java",
     ],
-    data: [
-        ":RkpdAppIntegrationTests",
-        ":RkpdAppUnitTests",
-    ],
+    main_class: "com.android.rkpdapp.RkpRegistrationCheck",
+    platform_apis: true,
 }
